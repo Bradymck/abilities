@@ -1,0 +1,19 @@
+{
+  "unique_name": "second-brain",
+  "matching_hotwords": [
+    "second brain", "my notes", "my note", "check my notes", "check notes",
+    "search notes", "search my notes", "find a note", "find note",
+    "read note", "read my note", "open note", "show note",
+    "create a note", "create note", "new note", "make a note",
+    "write a note", "take a note", "save a note", "jot down",
+    "capture this", "capture idea", "save this thought",
+    "what did I write about", "notes about", "note about",
+    "organize my notes", "organize inbox", "file this note",
+    "summarize this note", "distill", "key takeaway",
+    "draft something", "create from my notes", "express",
+    "weekly review", "what's new this week", "review my notes",
+    "favorite problems", "my problems", "add a problem",
+    "vault status", "how's my brain", "brain status",
+    "obsidian", "vault", "my vault", "knowledge base"
+  ]
+}

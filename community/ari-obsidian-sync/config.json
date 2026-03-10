@@ -1,4 +1,13 @@
 {
-  "unique_name": "ari-obsidian-sync",
-  "matching_hotwords": ["sync obsidian", "update notes", "pull vault", "push changes", "check obsidian"]
+  "unique_name": "obsidian-notes",
+  "matching_hotwords": [
+    "obsidian", "my notes", "my note", "check my notes", "check notes",
+    "search notes", "search my notes", "find a note", "find note",
+    "read note", "read my note", "open note", "show note",
+    "create a note", "create note", "new note", "make a note",
+    "write a note", "take a note", "save a note", "jot down",
+    "what did I write about", "notes about", "note about",
+    "sync obsidian", "update notes", "pull vault", "push changes",
+    "check obsidian", "vault", "my vault"
+  ]
 }

@@ -1,0 +1,3 @@
+
+📋 Validating: community/aquaprime-fading/
+  ✅ All checks passed!
