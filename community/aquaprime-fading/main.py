@@ -1,3 +1,6 @@
+from src.agent.capability import MatchingCapability
+from src.main import AgentWorker
+from src.agent.capability_worker import CapabilityWorker
 import datetime
 import json
 import random
@@ -6,9 +9,6 @@ from typing import Optional
 
 import requests
 
-from src.agent.capability import MatchingCapability
-from src.agent.capability_worker import CapabilityWorker
-from src.main import AgentWorker
 
 # =============================================================================
 # AquaPrime RPG Genesis — Voice RPG + Web3 Wallet for OpenHome
@@ -23,7 +23,6 @@ from src.main import AgentWorker
 # Server: platypuspassions.com
 # Live map: platypuspassions.com/AQUA-XXXX
 # =============================================================================
-
 BASE_URL = "https://www.platypuspassions.com"
 
 EXIT_WORDS = {
