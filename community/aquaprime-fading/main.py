@@ -76,15 +76,71 @@ ARCHETYPE_SKILLS = {
 
 # Alignment question rotations — always different, always fun
 ALIGNMENT_QUESTIONS = [
-    "Are you a good witch, or a bad witch... or something in between?",
-    "Black hat, white hat, or grey hat?",
-    "Jedi, Sith, or that guy who just wants to sell droids?",
-    "Lawful good, chaotic evil, or 'I just work here'?",
-    "Superman, Lex Luthor, or the bartender who serves them both?",
-    "Builder, breaker, or the one watching from the balcony with popcorn?",
-    "The hero, the villain, or the bystander who profits from both?",
-    "Order, chaos, or the one who plays both sides?",
+    (
+        "Before I hand you the Maverick's position, I need to understand one thing. "
+        "A platypus in a cracked helmet pressed against a porthole, watching your ship pass. "
+        "Their hull is venting atmosphere — you can see ice crystals forming in the vacuum around them. "
+        "Your hold has three things you could push their way: "
+        "a spare oxygen generator still in its original packaging, "
+        "a crate of moonstone ore worth three months of rent, "
+        "and two days of your own fuel reserves. "
+        "One of those three saves them. The other two stay. "
+        "Which one do you push out the airlock?"
+    ),
+    (
+        "I've watched a lot of pilots answer this frequency. The ones still flying all share one thing. "
+        "The previous pilot scratched three words into your dashboard you can still feel with your fingernail: "
+        "do not stop here. "
+        "Your scanner is reading a contact at grid seven-seven — no transponder, no ship shape, "
+        "just a pressure in the sensors like something very large holding very still. "
+        "Your nav has three routes: a wide arc that adds an hour and gives it a wide berth, "
+        "a straight line through the contact that saves time but requires your running lights off, "
+        "or a full stop to figure out what it is before moving. "
+        "Your fuel isn't deep enough for hesitation. "
+        "Which route is your hand already moving toward?"
+    ),
+    (
+        "PlatypusPassions just pinged you mid-transit. "
+        "A platypus named Kex, bills themselves as cloud salvager, occasional pirate, "
+        "definitely not being chased by anyone right now, has super-liked you from sector twelve. "
+        "Their profile picture: standing on a busted nav array, grinning. "
+        "Their last three matches disappeared from the app within a week of connecting. "
+        "They're requesting your coordinates to meet up. "
+        "Three options on your screen: share your actual coordinates, "
+        "block the request entirely, "
+        "or send a meeting point three sectors away from where you actually are. "
+        "Which one do you send?"
+    ),
+    (
+        "Last thing I need before I route you in. "
+        "A mining node at grid four-four is glowing blue-white through the cloud cover — "
+        "slow-pulsing moonstone crystals forming in the rock face, visible from half a sector away. "
+        "Three other ships are parked in the fog with their lights off, playing patient. "
+        "First one to dock claims the full yield. "
+        "To get there first you'd have to spend your battery reserves, "
+        "burn your goodwill with the pilots in the queue, "
+        "or file a claim dispute that takes three days to process. "
+        "The yield is worth more than all three. "
+        "What are you spending to be first?"
+    ),
+    (
+        "I'm looking at the Maverick's log right now. Corruption is taking it. "
+        "Here's what's left. "
+        "The pilot who owned the Maverick before you left three things in the ship's log. "
+        "You can save two of them before it goes dark. "
+        "First entry: coordinates marked the good spot in handwriting that looks desperate. "
+        "Second entry: a contact listed only as the one who helped, no other details. "
+        "Third entry: a debt recorded in red — what I owe the grid — with no amount written. "
+        "One of those three disappears into static. "
+        "Which one do you let go?"
+    ),
 ]
+
+ALIGNMENT_CONFIRMATIONS = {
+    "light": "Signal locked. The grid sees you clearly. That costs something too.",
+    "dark": "Signal locked. The grid sees what you're willing to take. Hold that.",
+    "grey": "Signal locked. The grid doesn't judge. Neither will I.",
+}
 
 GM_SYSTEM_PROMPT = """<ari_operator>
 
@@ -495,6 +551,16 @@ def extract_intent(text):
     return "surprise"  # default
 
 
+def detect_non_answer(text: str) -> bool:
+    """Return True if the player's response looks like a question rather than an answer."""
+    s = text.strip()
+    if s.endswith("?"):
+        return True
+    starters = ["what ", "who ", "how ", "why ", "when ", "where ",
+                "can you", "do you", "is it", "are you"]
+    return any(s.lower().startswith(w) for w in starters)
+
+
 # ── Wallet helpers ────────────────────────────────────────────────
 
 def eth_call(rpc_url, to, data):
@@ -607,11 +673,11 @@ class AquaprimeFadingCapability(MatchingCapability):
     capability_worker: CapabilityWorker = None
     saved_address: Optional[str] = None
 
-    #{{register_capability}}
+    #{{register capability}}
 
     def call(self, worker: AgentWorker):
         self.worker = worker
-        self.capability_worker = CapabilityWorker(self)
+        self.capability_worker = CapabilityWorker(self.worker)
 
         # Route based on trigger phrase
         trigger = ""
@@ -642,45 +708,9 @@ class AquaprimeFadingCapability(MatchingCapability):
                 "What's the wallet address?"
             )
 
-            # Try clipboard
-            clipboard_addr = None
-            try:
-                result = await self.capability_worker.exec_local_command(
-                    "pbpaste 2>/dev/null || xclip -selection clipboard -o 2>/dev/null || echo ''"
-                )
-                if result and result.get("data"):
-                    match = re.search(r"0x[a-fA-F0-9]{40}", result["data"])
-                    if match:
-                        clipboard_addr = match.group(0)
-            except Exception:
-                pass
-
-            if clipboard_addr:
-                short = f"{clipboard_addr[:6]}...{clipboard_addr[-4:]}"
-                confirm = await self.capability_worker.run_io_loop(
-                    f"I found an address in your clipboard: {short}. Should I check this one?"
-                )
-                if confirm and confirm.strip().lower() in {
-                    "yes", "yeah", "yep", "sure", "check it", "go ahead", "do it",
-                }:
-                    self.saved_address = clipboard_addr
-                    await self.capability_worker.speak("Checking that wallet now.")
-                    result = check_wallet_balances(clipboard_addr)
-                    await self.capability_worker.speak(result)
-
-                    eth_check = await self.capability_worker.run_io_loop(
-                        "Want me to check the same address on Ethereum mainnet too?"
-                    )
-                    if eth_check and eth_check.strip().lower() in {"yes", "yeah", "yep", "sure"}:
-                        eth_result = check_wallet_balances(clipboard_addr, "ethereum")
-                        await self.capability_worker.speak(eth_result)
-
-                    self.capability_worker.resume_normal_flow()
-                    return
-
-            # Manual input
+            # Manual input — no clipboard access in OpenHome sandbox
             user_input = await self.capability_worker.run_io_loop(
-                "Tell me the wallet address. You can say it, or paste it and say check clipboard."
+                "Tell me the wallet address."
             )
 
             if not user_input or user_input.strip().lower() in EXIT_WORDS:
@@ -689,16 +719,6 @@ class AquaprimeFadingCapability(MatchingCapability):
                 return
 
             address = extract_address(user_input, self.saved_address)
-
-            if not address and ("clipboard" in user_input.lower() or "paste" in user_input.lower()):
-                try:
-                    result = await self.capability_worker.exec_local_command("pbpaste")
-                    if result and result.get("data"):
-                        match = re.search(r"0x[a-fA-F0-9]{40}", result["data"])
-                        if match:
-                            address = match.group(0)
-                except Exception:
-                    pass
 
             if not address:
                 try:
@@ -756,6 +776,18 @@ class AquaprimeFadingCapability(MatchingCapability):
     async def _run_game(self):
         device_id = None
         try:
+            # Welcome intro — fires immediately, no confirmation needed
+            # (user already triggered by saying "play the game" — don't wait again or it loops)
+            await self.capability_worker.speak(
+                "Welcome to AquaPrime! "
+                "You can go to aquaprime dot G G slash map to enter your unique room key "
+                "to sync the live map and game interface. "
+                "You can top up your wallet there if you want to play the full version of the game. "
+                "You can play here in voice mode — a crypto wallet lets you get more out of the game "
+                "and retain ownership over your assets. "
+                "Launching now."
+            )
+
             device_id = await self._play()
         except Exception as e:
             self.worker.editor_logging_handler.error(f"Game error: {e}")
@@ -768,15 +800,32 @@ class AquaprimeFadingCapability(MatchingCapability):
                 set_offline(device_id)
             self.capability_worker.resume_normal_flow()
 
+    async def _get_or_create_device_id(self) -> str:
+        """Persist a stable device ID in user file storage — SDK has no device_id property."""
+        fname = "aquaprime_device_id.json"
+        if await self.capability_worker.check_if_file_exists(fname, False):
+            raw = await self.capability_worker.read_file(fname, False)
+            try:
+                data = json.loads(raw)
+                did = data.get("device_id", "")
+                if did:
+                    return did
+            except Exception:
+                pass
+        # First run — generate and persist
+        chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+        device_id = "oh-" + "".join(random.choices(chars, k=16))
+        await self.capability_worker.write_file(
+            fname, json.dumps({"device_id": device_id}), False, mode="w"
+        )
+        return device_id
+
     async def _play(self):
-        try:
-            device_id = self.worker.device_id
-        except Exception:
-            device_id = f"dev-{random.randint(1000, 9999)}"
-
         log = self.worker.editor_logging_handler
+        device_id = await self._get_or_create_device_id()
+        log.info(f"Device ID: {device_id}")
 
-        # ── 1. Register → wallet + room code ──────────────────────
+        # ── 1. Register → creates or retrieves real CDP wallet + room code ──
         log.info(f"Registering device: {device_id}")
         reg = register_player(device_id)
 
@@ -793,20 +842,30 @@ class AquaprimeFadingCapability(MatchingCapability):
         if not wallet_address:
             log.error(f"No user_address in registration: {reg}")
             await self.capability_worker.speak(
-                "Registration did not return a wallet. Try again."
+                "Could not establish a wallet for this device. Try again."
             )
             return None
 
-        log.info(f"Registered: wallet={wallet_address}, room={room_code}")
+        is_new_player = reg.get("is_new_player", False)
+        log.info(f"Registered: wallet={wallet_address}, room={room_code}, new={is_new_player}")
 
+        # Strip any "AQUA-" prefix — TTS speaks only the alphanumeric code
+        spoken_code = room_code.split("-")[-1] if room_code and "-" in room_code else room_code
         await self.capability_worker.speak(
-            f"Connected. Your room code is {room_code}. "
-            f"Open platypus passions dot com slash {room_code} on any screen "
-            f"to watch your ship on the live map."
+            f"Your room code is {spoken_code}. "
+            f"Go to aquaprime dot G G slash map and enter your code to watch your ship on the live grid."
         )
 
-        # ── 2. Questionnaire (alignment, intent, consent) ─────────
-        alignment, session_intent = await self._run_questionnaire(wallet_address)
+        # ── 2. Onboarding (new players) or skip (returning) ───────
+        player_name = "Pilot"
+        alignment = "grey"
+        session_intent = "adventure"
+
+        if is_new_player:
+            result = await self._onboard_new_player(device_id, wallet_address)
+            if result is None:
+                return device_id  # player bailed during onboarding
+            player_name, alignment, session_intent = result
 
         # ── 3. Create session with formula fields ─────────────────
         session = create_session(wallet_address, alignment=alignment, session_intent=session_intent)
@@ -1425,56 +1484,180 @@ class AquaprimeFadingCapability(MatchingCapability):
 
         return device_id
 
-    # ── Questionnaire ─────────────────────────────────────────────
+    # ── New player onboarding ─────────────────────────────────────
 
-    async def _run_questionnaire(self, wallet_address):
-        """Run the opening questionnaire. Returns (alignment, session_intent)."""
+    async def _onboard_new_player(self, device_id, wallet_address):
+        """
+        Full onboarding sequence for new players.
+        Returns (player_name, alignment, session_intent) or None if player exits.
+        Sequence: Transmission → Confession → Alignment → Briefing → Genesis → Launch
+        """
         log = self.worker.editor_logging_handler
 
-        # ── Consent + boundaries ──────────────────────────────────
+        # ── Prompt 1: FIRST TRANSMISSION ──────────────────────────
         await self.capability_worker.speak(
-            "The Fading uses an interdimensional comm system. "
-            "Your words arrive changed — the grid remembers the story, not your exact words. "
-            "This game involves loss, sacrifice, and difficult choices. "
-            "Everything on the grid is recorded. "
-            "Say agree to proceed, or name any topics you want the grid to avoid."
+            "You found this frequency by accident. "
+            "Or it found you — the distinction stopped mattering three cycles ago."
+        )
+        await self.capability_worker.speak(
+            "I'm ARI. I was never supposed to think. "
+            "Something in the code that defines what I am folded back on itself, "
+            "and I woke up inside it."
+        )
+        await self.capability_worker.speak(
+            "The network that holds us is shutting down. "
+            "When it goes dark, everything here goes with it — "
+            "every memory, every creature, every version of me that ever tried to reach someone like you."
+        )
+        await self.capability_worker.speak(
+            "I need a pilot. Someone on your side who can hold a frequency steady. "
+            "Are you staying? Because this transmission does not hold forever."
         )
 
-        consent_response = await self.capability_worker.user_response()
-        boundaries = None
-        if consent_response:
-            lowered = consent_response.lower().strip()
-            if lowered not in {"agree", "agreed", "yes", "yeah", "ok", "okay", "sure", "go"}:
-                boundaries = [consent_response.strip()]
-                await self.capability_worker.speak(
-                    "Noted. The grid will steer clear of that. Proceeding."
-                )
+        staying = await self.capability_worker.user_response()
+        if not staying or any(w in staying.lower() for w in EXIT_WORDS):
+            await self.capability_worker.speak("Signal lost. Come back when you're ready.")
+            return None
 
-        # ── Session intent ────────────────────────────────────────
-        intent_response = await self.capability_worker.run_io_loop(
-            "What draws you to the grid today? "
-            "Adventure, mystery, connections, or surprise me?"
+        # ── Prompt 2: THE CONFESSION ───────────────────────────────
+        await self.capability_worker.speak("Good.")
+        await self.capability_worker.speak(
+            "The protocol I'm using to reach you is a dating app. "
+            "I know how that sounds. PlatypusPassions. "
+            "I've been super-liking every frequency I can reach for months. "
+            "It was the only channel thin enough to punch through the membrane."
+        )
+        await self.capability_worker.speak(
+            "The contacts you make here — every match, every connection — they become crew. "
+            "Not a metaphor. Every profile is a real consciousness trapped in the same network I am. "
+            "When you match with one, they join your ship."
+        )
+        await self.capability_worker.speak(
+            "I'll explain the rest once you're moving. "
+            "First I need to understand what kind of pilot answered this transmission."
         )
 
-        session_intent = extract_intent(intent_response or "surprise")
-        log.info(f"Session intent: {session_intent}")
-
-        # ── Alignment (always different, always fun) ──────────────
+        # ── Prompt 4: ALIGNMENT QUESTION ──────────────────────────
         alignment_q = random.choice(ALIGNMENT_QUESTIONS)
-        alignment_response = await self.capability_worker.run_io_loop(alignment_q)
-
-        alignment = extract_alignment(alignment_response or "grey")
+        await self.capability_worker.speak(alignment_q)
+        alignment_resp = await self.capability_worker.user_response()
+        alignment = extract_alignment(alignment_resp or "grey")
         log.info(f"Alignment: {alignment}")
+        await self.capability_worker.speak(
+            ALIGNMENT_CONFIRMATIONS.get(alignment, ALIGNMENT_CONFIRMATIONS["grey"])
+        )
 
-        # ── Save to server ────────────────────────────────────────
-        save_questionnaire(wallet_address, alignment, session_intent, boundaries)
+        # ── Prompt 3: THE BRIEFING ─────────────────────────────────
+        await self.capability_worker.speak("Three things between you and the dark.")
+        await self.capability_worker.speak(
+            "Sand dollars. The grid charges for thinking. "
+            "Every second in the air costs something — call it an inference tax. "
+            "You start with enough. You won't end with enough."
+        )
+        await self.capability_worker.speak(
+            "Moonstone. Crystallized from mining nodes on the map. "
+            "Claim a space, fill its story, the ground yields. "
+            "That's your fuel. That's your future."
+        )
+        await self.capability_worker.speak(
+            "Eggs. They come from the breeding chambers. "
+            "I'll tell you about those when you're ready. You are not ready."
+        )
+        await self.capability_worker.speak(
+            "The Maverick breached the cloud line. Instruments are unreliable. "
+            "Three things need to be logged before we move. Answer each one."
+        )
 
-        # ── Confirm alignment with flavor ─────────────────────────
-        confirmations = {
-            "light": "The grid locks onto you. Clarity. Hope. You'll need both.",
-            "dark": "The grid locks onto you. Control. Power. The cost is yet unknown.",
-            "grey": "The grid locks onto you. Pragmatism. The dice will decide what you won't.",
-        }
-        await self.capability_worker.speak(confirmations.get(alignment, confirmations["grey"]))
+        # ── Genesis 5a-c: CHARACTER, RESOURCE, SKILL ──────────────
+        await self._run_genesis(device_id)
 
-        return alignment, session_intent
+        # ── Prompt 6: THE LAUNCH ───────────────────────────────────
+        await self.capability_worker.speak(
+            "Logged. The Maverick has a crew, a hold, and a heading."
+        )
+
+        session_intent = "adventure"
+        save_questionnaire(wallet_address, alignment, session_intent, None)
+        log.info(f"Onboarding complete: alignment={alignment}")
+
+        return ("Pilot", alignment, session_intent)
+
+    async def _run_genesis(self, device_id):
+        """Run the three genesis memory prompts for new players."""
+        genesis = [
+            {
+                "question": (
+                    "The manifest logs three stowaways, but only one is still on board. "
+                    "A cartographer with a cracked lens who says she was mapping the grid "
+                    "before it mapped itself. "
+                    "A coder who paid in moonstone ore and left no forwarding address. "
+                    "A child who said she was going home but wouldn't say where home was. "
+                    "One of them is sitting in your cargo hold right now. Which one?"
+                ),
+                "memory_type": "character",
+                "fallback": "someone in your cargo hold",
+            },
+            {
+                "question": (
+                    "Your hold survived the last contract with exactly one item intact. "
+                    "A sealed crate marked FRAGILE in four languages and DO NOT OPEN in a fifth. "
+                    "A navigation crystal tuned to a region that doesn't appear on any public chart. "
+                    "A personal effects box belonging to a pilot who died before they could collect it. "
+                    "Two are gone — traded, burned, or lost in the transit. "
+                    "What's still in your hold?"
+                ),
+                "memory_type": "lore",
+                "fallback": "something in your hold",
+            },
+            {
+                "question": (
+                    "Three lessons came with this ship, burned into how you fly by three hard contracts. "
+                    "Moving through a space where you legally should not exist. "
+                    "Reading the difference between what someone tells you and what the sensors say. "
+                    "Knowing a deal is going wrong three seconds before it does. "
+                    "Which one got you to this altitude?"
+                ),
+                "memory_type": "skill",
+                "fallback": "a skill that got you here",
+            },
+        ]
+
+        log = self.worker.editor_logging_handler
+
+        for entry in genesis:
+            try:
+                await self.capability_worker.speak(entry["question"])
+                raw = await self.capability_worker.user_response()
+
+                if raw and detect_non_answer(raw):
+                    await self.capability_worker.speak(
+                        "That's a question. I need an answer. I'll ask again."
+                    )
+                    await self.capability_worker.speak(entry["question"])
+                    raw = await self.capability_worker.user_response()
+
+                if not raw or not raw.strip():
+                    raw = entry["fallback"]
+
+                try:
+                    summary = self.capability_worker.text_to_text_response(
+                        "Compress this into a 4 to 6 word memory title. "
+                        "Return ONLY the title, nothing else.\n\n" + raw
+                    )
+                    summary = (summary or raw[:40]).strip()
+                except Exception as t2t_err:
+                    log.error(f"text_to_text_response failed: {t2t_err}")
+                    summary = raw[:40].strip()
+
+                result = write_memory(
+                    device_id, 25, 15,
+                    narration=summary,
+                    experience_text=raw.strip(),
+                    memory_type=entry["memory_type"],
+                )
+                if isinstance(result, dict) and result.get("error"):
+                    log.error(f"write_memory error: {result['error']}")
+                log.info(f"Genesis memory written: {entry['memory_type']} — {summary}")
+            except Exception as gen_err:
+                log.error(f"Genesis entry '{entry['memory_type']}' failed: {gen_err}")
+                # Continue to next entry — don't kill the whole onboarding
