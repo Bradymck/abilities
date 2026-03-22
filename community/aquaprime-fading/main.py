@@ -750,13 +750,40 @@ def save_questionnaire(wallet_address, alignment, session_intent, boundaries=Non
     return api_post("/api/unified/questionnaire", payload)
 
 
-def process_turn(wallet_address, player_text, session_id):
-    return api_post("/api/unified/turn", {
+def extract_direction(text: str) -> Optional[str]:
+    """Parse player speech for a cardinal direction.
+
+    Returns 'north', 'south', 'east', or 'west', or None if not found.
+    Handles single letters (n/s/e/w), aliases (forward→north, back→south,
+    left→west, right→east), and full words.
+    """
+    DIRECTION_MAP = {
+        "north": "north", "n": "north",
+        "south": "south", "s": "south",
+        "east": "east", "e": "east",
+        "west": "west", "w": "west",
+        "forward": "north", "forwards": "north",
+        "back": "south", "backward": "south", "backwards": "south",
+        "left": "west",
+        "right": "east",
+    }
+    lowered = text.lower().strip()
+    for word in re.split(r"[\s,\.!?]+", lowered):
+        if word in DIRECTION_MAP:
+            return DIRECTION_MAP[word]
+    return None
+
+
+def process_turn(wallet_address, player_text, session_id, direction: Optional[str] = None):
+    payload = {
         "wallet_address": wallet_address,
         "player_text": player_text,
         "session_id": session_id,
         "client_type": "voice",
-    })
+    }
+    if direction:
+        payload["direction"] = direction
+    return api_post("/api/unified/turn", payload)
 
 
 def fetch_memories(device_id):
@@ -1090,27 +1117,53 @@ def match_slot_number(transcription: str) -> Optional[int]:
 
 
 def select_keyword_options(formula_type: str, memories: list, keyword_state: dict,
-                           count: int = 3) -> list:
+                           count: int = 3, turn_result: Optional[dict] = None) -> list:
     """Select keyword options appropriate for this formula type.
 
-    For consumptive formulas (LOSE, DEGRADE, CONDITIONAL): offer keywords from ship log.
+    For consumptive formulas (LOSE, DEGRADE, CONDITIONAL): offer the server's
+    targeted entry first (Bug 4), then fill remaining slots from actual ship log
+    titles — not filtered through KEYWORD_REGISTRY (Bug 5).
     For generative formulas (CREATE, LEARN, etc.): offer new keywords not in ship log.
     """
-    ship_titles = {m.get("memory_title") for m in memories if m.get("memory_title")}
+    ship_titles_list = [m.get("memory_title") for m in memories if m.get("memory_title")]
+    ship_titles = set(ship_titles_list)
 
     upper_formula = (formula_type or "").upper()
 
-    # Consumptive formulas: offer what's in the ship log
+    # Consumptive formulas: player is losing/degrading a specific memory
     if upper_formula in CONSUME_FORMULAS:
-        # Only offer keywords that are in the registry AND in the ship log
-        in_log = [t for t in ship_titles if t in KEYWORD_REGISTRY]
+        options: list = []
+
+        # Bug 4 fix: use the server's targeted entry as option 1
+        target_entry = (turn_result or {}).get("targetEntry")
+        target_name = None
+        if isinstance(target_entry, dict):
+            target_name = target_entry.get("name") or target_entry.get("memory_title")
+        elif isinstance(target_entry, str):
+            target_name = target_entry
+
+        if target_name:
+            options.append(target_name)
+
+        # Bug 5 fix: fill remaining slots from actual ship log titles,
+        # NOT filtered through KEYWORD_REGISTRY so LLM-extracted memories appear
         if upper_formula == "CONDITIONAL":
-            # Only offer skills
-            in_log = [t for t in in_log if KEYWORD_REGISTRY[t]["category"] == "skill"]
-        if len(in_log) >= 2:
-            random.shuffle(in_log)
-            return in_log[:count]
-        # Not enough keywords in log — fall through to generative
+            # CONDITIONAL still prefers skills — filter by memory_type
+            skill_titles = [
+                m.get("memory_title") for m in memories
+                if m.get("memory_title") and m.get("memory_type") == "skill"
+                and m.get("memory_title") != target_name
+            ]
+            random.shuffle(skill_titles)
+            options.extend(skill_titles)
+        else:
+            remaining = [t for t in ship_titles_list if t != target_name]
+            random.shuffle(remaining)
+            options.extend(remaining)
+
+        if len(options) >= 1:
+            return options[:count]
+        # No ship log at all — fall through to generative
 
     # CRAFT: pick from ship log (player picks 2)
     if upper_formula == "CRAFT":
@@ -1755,7 +1808,8 @@ class AquaprimeFadingCapability(MatchingCapability):
 
             # ── Process turn via server ───────────────────────────
             log.info(f"Turn {turn}: input='{user_input[:50]}'")
-            turn_result = process_turn(wallet_address, user_input.strip(), session_id)
+            detected_direction = extract_direction(user_input)
+            turn_result = process_turn(wallet_address, user_input.strip(), session_id, direction=detected_direction)
 
             if not turn_result or turn_result.get("error"):
                 error_msg = turn_result.get("error") if turn_result else "no response"
@@ -1962,7 +2016,7 @@ class AquaprimeFadingCapability(MatchingCapability):
             else:
                 # ── KEYWORD CHOICE ──────────────────────────────────
                 options = select_keyword_options(
-                    formula_type or "CREATE", memories, keyword_state
+                    formula_type or "CREATE", memories, keyword_state, turn_result=turn_result
                 )
 
                 if not options:
@@ -2079,7 +2133,7 @@ class AquaprimeFadingCapability(MatchingCapability):
                         rerolls_this_session += 1
                         log.info(f"Re-roll accepted: cost={reroll_cost}")
 
-                        reroll_result = process_turn(wallet_address, user_input.strip(), session_id)
+                        reroll_result = process_turn(wallet_address, user_input.strip(), session_id, direction=detected_direction)
                         if reroll_result and not reroll_result.get("error"):
                             turn_result = reroll_result
                             battery = turn_result.get("battery", battery)
@@ -2101,7 +2155,7 @@ class AquaprimeFadingCapability(MatchingCapability):
                             # Re-present keyword choice for re-rolled formula
                             new_options = select_keyword_options(
                                 turn_result.get("formulaType", "CREATE"),
-                                memories, keyword_state,
+                                memories, keyword_state, turn_result=turn_result,
                             )
                             if new_options:
                                 names = [o.replace("The ", "") for o in new_options]
