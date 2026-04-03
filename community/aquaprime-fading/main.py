@@ -1361,7 +1361,8 @@ class AquaprimeFadingCapability(MatchingCapability):
 
     async def _get_or_create_device_id(self) -> str:
         """Persist a stable device ID in user file storage — SDK has no device_id property."""
-        fname = "aquaprime_device_id.json"
+        # Shared across all OpenHome abilities — same wallet for deadman.fm, AquaPrime, etc.
+        fname = "openhome_device_id.json"
         if await self.capability_worker.check_if_file_exists(fname, False):
             raw = await self.capability_worker.read_file(fname, False)
             try:

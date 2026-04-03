@@ -1,0 +1,31 @@
+{
+  "target": {
+    "username": "JesseRank",
+    "url": "https://x.com/JesseRank"
+  },
+  "checkIntervalMs": 300000,
+  "engagement": {
+    "enabled": true,
+    "actions": ["like", "retweet", "bookmark"],
+    "commentText": "🔥 This is next-level!"
+  },
+  "crosspost": {
+    "farcaster": false,
+    "discord": true,
+    "discordTarget": "community-feed"
+  },
+  "videoDetection": {
+    "keywords": ["Play Video", "video", "watch"]
+  },
+  "circuitBreaker": {
+    "threshold": 5,
+    "timeout": 30000
+  },
+  "retry": {
+    "detectVideoTweet": 3,
+    "autoEngage": 3,
+    "crossPostToFarcaster": 3,
+    "addToCommunityFeed": 3,
+    "monitorCycle": 3
+  }
+}
